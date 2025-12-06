@@ -3,7 +3,9 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+import re
+
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -17,7 +19,6 @@ from .message_queue import MessageQueue
 from .models import (
     ErrorResponse,
     HealthResponse,
-    MessageRequest,
     MessageResponse,
     QueueStatusResponse,
 )
@@ -211,6 +212,32 @@ async def health_check() -> HealthResponse:
     )
 
 
+def validate_and_sanitize_channel(channel: str) -> str:
+    """
+    Validate and sanitize channel name.
+    
+    Args:
+        channel: Channel name to validate
+        
+    Returns:
+        Sanitized channel name
+        
+    Raises:
+        ValueError: If channel is invalid
+    """
+    if not channel or not channel.strip():
+        raise ValueError("Channel name is required and cannot be empty")
+    # Remove potentially dangerous characters
+    # Allow alphanumeric, spaces, hyphens, underscores only
+    sanitized = re.sub(r"[^a-zA-Z0-9\s\-_]", "", channel)
+    sanitized = sanitized.strip()
+    if not sanitized:
+        raise ValueError("Channel name is required and cannot be empty after sanitization")
+    if len(sanitized) > 50:
+        raise ValueError("Channel name exceeds maximum length of 50 characters")
+    return sanitized
+
+
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute", key_func=get_rate_limit_key)
 @app.post(
     "/message",
@@ -220,14 +247,18 @@ async def health_check() -> HealthResponse:
     dependencies=[RequireAuth] if settings.enable_auth else [],
 )
 async def send_message(
-    request: Request, message_request: MessageRequest
+    request: Request,
+    channel: str = Query(..., description="Channel name (required)", min_length=1),
 ) -> MessageResponse:
     """
     Send a message to the Meshtastic device.
+    
+    The request body is sent as the message text. The channel is specified
+    as a query parameter.
 
     Args:
         request: FastAPI request object
-        message_request: Message request containing message text and channel
+        channel: Channel name (query parameter)
 
     Returns:
         Message response with queue information
@@ -246,59 +277,80 @@ async def send_message(
             detail="Message queue not initialized",
         )
 
+    # Validate and sanitize channel
+    try:
+        sanitized_channel = validate_and_sanitize_channel(channel)
+    except ValueError as e:
+        audit_logger.warning(f"Message rejected from {client_ip}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    # Check if channel is blacklisted
+    if settings.blacklisted_channels:
+        channel_lower = sanitized_channel.lower()
+        blacklisted_lower = [ch.lower() for ch in settings.blacklisted_channels]
+        if channel_lower in blacklisted_lower:
+            audit_logger.warning(
+                f"Message rejected from {client_ip}: channel '{sanitized_channel}' is blacklisted"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Channel '{sanitized_channel}' is blacklisted and cannot be used",
+            )
+
+    # Read message from request body
+    try:
+        body_bytes = await request.body()
+        message_text = body_bytes.decode("utf-8").strip()
+    except Exception as e:
+        logger.error(f"Error reading request body: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to read message from request body",
+        )
+
+    # Validate message is not empty
+    if not message_text:
+        audit_logger.warning(f"Message rejected from {client_ip}: message body is empty")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message body cannot be empty",
+        )
+
     # Validate message length
-    if len(message_request.message) > settings.max_message_length:
+    if len(message_text) > settings.max_message_length:
         audit_logger.warning(
             f"Message too long rejected from {client_ip}: "
-            f"{len(message_request.message)} characters"
+            f"{len(message_text)} characters"
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Message exceeds maximum length of {settings.max_message_length} characters",
         )
 
-    # Validate channel is provided
-    if not message_request.channel or not message_request.channel.strip():
-        audit_logger.warning(f"Message rejected from {client_ip}: channel is required")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Channel is required",
-        )
-
-    # Check if channel is blacklisted
-    if settings.blacklisted_channels:
-        channel_lower = message_request.channel.strip().lower()
-        blacklisted_lower = [ch.lower() for ch in settings.blacklisted_channels]
-        if channel_lower in blacklisted_lower:
-            audit_logger.warning(
-                f"Message rejected from {client_ip}: channel '{message_request.channel}' is blacklisted"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Channel '{message_request.channel}' is blacklisted and cannot be used",
-            )
-
     # Enqueue the message
     try:
         message_id, queue_position = message_queue.enqueue(
-            message=message_request.message,
-            channel=message_request.channel,
+            message=message_text,
+            channel=sanitized_channel,
         )
 
         # Audit log (sanitized)
-        sanitized_msg = sanitize_message(message_request.message, settings)
+        sanitized_msg = sanitize_message(message_text, settings)
         audit_logger.info(
             f"Message queued: ID={message_id[:8]}... "
             f"from {client_ip} "
-            f"channel={message_request.channel} "
-            f"length={len(message_request.message)}"
+            f"channel={sanitized_channel} "
+            f"length={len(message_text)}"
         )
 
         return MessageResponse(
             success=True,
             message_id=message_id,
-            message=message_request.message,
-            channel=message_request.channel,
+            message=message_text,
+            channel=sanitized_channel,
             queue_position=queue_position,
         )
 
