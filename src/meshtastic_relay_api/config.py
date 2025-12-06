@@ -86,8 +86,8 @@ class Settings(BaseSettings):
         description="Enable CORS",
     )
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["*"],
-        description="Allowed CORS origins (comma-separated in env var)",
+        default_factory=list,
+        description="Allowed CORS origins (comma-separated in env var). Default: empty (no CORS). Use '*' for all origins.",
     )
     enable_hsts: bool = Field(
         default=False,
@@ -121,6 +121,61 @@ class Settings(BaseSettings):
         description="Timeout in seconds for Ollama API requests",
         ge=1,
         le=300,
+    )
+
+    # Database settings
+    db_path: Optional[str] = Field(
+        default=None,
+        description="Path to SQLite database file (default: messages.db in current directory)",
+    )
+    message_retention_days: int = Field(
+        default=30,
+        description="Number of days to retain messages in database",
+        ge=1,
+    )
+
+    # Webhook settings
+    webhook_timeout: int = Field(
+        default=10,
+        description="Timeout in seconds for webhook requests",
+        ge=1,
+        le=60,
+    )
+    webhook_max_retries: int = Field(
+        default=3,
+        description="Maximum number of retries for failed webhook requests",
+        ge=0,
+        le=10,
+    )
+    webhook_retry_delay: float = Field(
+        default=2.0,
+        description="Delay in seconds between webhook retries",
+        ge=0.1,
+        le=60.0,
+    )
+
+    # Message queue settings
+    message_queue_max_size: int = Field(
+        default=1000,
+        description="Maximum number of messages in queue (0 = unlimited)",
+        ge=0,
+    )
+    message_queue_max_retries: int = Field(
+        default=3,
+        description="Maximum number of retries for failed message sends",
+        ge=0,
+        le=10,
+    )
+    message_queue_retry_delay: float = Field(
+        default=2.0,
+        description="Delay in seconds between message retries",
+        ge=0.1,
+        le=60.0,
+    )
+    message_cleanup_interval_hours: int = Field(
+        default=24,
+        description="Interval in hours between automatic message cleanup runs",
+        ge=1,
     )
 
     @field_validator("connection_type", mode="before")
@@ -158,13 +213,15 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
+    def parse_cors_origins(cls, v: str | list[str] | None) -> list[str]:
         """Parse CORS origins from comma-separated string or list."""
+        if v is None:
+            return []
         if isinstance(v, str):
             # Split by comma and strip whitespace
             origins = [origin.strip() for origin in v.split(",") if origin.strip()]
-            return origins if origins else ["*"]
-        return v
+            return origins
+        return v if isinstance(v, list) else []
 
     @field_validator("blacklisted_channels", mode="before")
     @classmethod

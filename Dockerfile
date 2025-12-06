@@ -50,8 +50,10 @@ COPY --from=builder /app/VERSION ./VERSION
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Create non-root user and data directory
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/data && \
+    chown -R appuser:appuser /app
 USER appuser
 
 # Expose port

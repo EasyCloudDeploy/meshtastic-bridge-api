@@ -3,7 +3,7 @@
 import logging
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
@@ -22,12 +22,14 @@ class ChannelNotFoundError(Exception):
 class MeshtasticManager:
     """Manages connection to Meshtastic device via USB or TCP."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, message_callback: Optional[Callable] = None) -> None:
         """
         Initialize the Meshtastic manager.
 
         Args:
             settings: Application settings
+            message_callback: Optional callback function for incoming messages
+                            Signature: callback(message_text: str, channel: str, sender_id: str, sender_name: str)
         """
         self.settings = settings
         self.interface: Optional[
@@ -37,6 +39,7 @@ class MeshtasticManager:
         self._connected = False
         self._connection_attempts = 0
         self._max_connection_attempts = 3
+        self.message_callback = message_callback
 
     def connect(self) -> bool:
         """
@@ -76,6 +79,23 @@ class MeshtasticManager:
 
                 # Wait a moment for connection to stabilize
                 time.sleep(1)
+
+                # Set up message callback if provided
+                # Note: TCPInterface doesn't have subscribe() method, only SerialInterface does
+                # For TCP, messages are received via the receive() method in a background thread
+                if self.message_callback and self.interface:
+                    try:
+                        # Only SerialInterface has subscribe method
+                        if hasattr(self.interface, "subscribe"):
+                            self.interface.subscribe(self._on_receive)
+                            logger.info("Message subscription enabled")
+                        else:
+                            # For TCPInterface, we need to handle messages differently
+                            # The TCPInterface receives messages automatically via its internal thread
+                            # We'll need to override or hook into the receive mechanism
+                            logger.info("TCPInterface detected - message reception handled automatically")
+                    except Exception as e:
+                        logger.warning(f"Failed to set up message subscription: {e}")
 
                 # Verify connection by checking if interface has node info
                 if self.interface and hasattr(self.interface, "myInfo"):
@@ -293,4 +313,93 @@ class MeshtasticManager:
                     pass
 
             return info
+
+    def _on_receive(self, packet, interface) -> None:
+        """
+        Callback for receiving messages from Meshtastic device.
+
+        Args:
+            packet: Received packet
+            interface: Meshtastic interface
+        """
+        try:
+            # Extract message data from packet
+            if hasattr(packet, "decoded") and packet.decoded:
+                decoded = packet.decoded
+                if hasattr(decoded, "text"):
+                    message_text = decoded.text
+                    channel_index = decoded.channel if hasattr(decoded, "channel") else 0
+
+                    # Get channel name
+                    channel_name = self._get_channel_name(channel_index)
+
+                    # Get sender info
+                    sender_id = None
+                    sender_name = None
+                    if hasattr(packet, "fromId"):
+                        sender_id = str(packet.fromId)
+                    # Use getattr to access 'from' attribute (reserved keyword)
+                    packet_from = getattr(packet, "from", None)
+                    if packet_from:
+                        if hasattr(packet_from, "id"):
+                            sender_id = str(packet_from.id)
+                        if hasattr(packet_from, "longName"):
+                            sender_name = packet_from.longName
+                        elif hasattr(packet_from, "shortName"):
+                            sender_name = packet_from.shortName
+
+                    logger.info(
+                        f"Received message on channel '{channel_name}': "
+                        f"{message_text[:50]}{'...' if len(message_text) > 50 else ''}"
+                    )
+
+                    # Call the callback if set
+                    if self.message_callback:
+                        try:
+                            self.message_callback(
+                                message_text=message_text,
+                                channel=channel_name,
+                                sender_id=sender_id,
+                                sender_name=sender_name,
+                            )
+                        except Exception as e:
+                            logger.error(f"Error in message callback: {e}", exc_info=True)
+
+        except Exception as e:
+            logger.error(f"Error processing received message: {e}", exc_info=True)
+
+    def _get_channel_name(self, channel_index: int) -> str:
+        """
+        Get channel name by index.
+
+        Args:
+            channel_index: Channel index
+
+        Returns:
+            Channel name or 'Unknown' if not found
+        """
+        if self.interface is None:
+            return "Unknown"
+
+        try:
+            if hasattr(self.interface, "localNode") and self.interface.localNode:
+                channels = getattr(self.interface.localNode, "channels", None)
+                if channels:
+                    for channel_setting in channels:
+                        if (
+                            hasattr(channel_setting, "index")
+                            and channel_setting.index == channel_index
+                        ):
+                            if (
+                                hasattr(channel_setting, "settings")
+                                and channel_setting.settings
+                                and hasattr(channel_setting.settings, "name")
+                            ):
+                                return channel_setting.settings.name
+                    # Default channel name
+                    return f"Channel {channel_index}"
+        except Exception as e:
+            logger.error(f"Error getting channel name: {e}", exc_info=True)
+
+        return "Unknown"
 

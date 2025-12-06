@@ -8,6 +8,10 @@ services:
     container_name: meshtastic-relay-api
     ports:
       - "8000:8000"
+    volumes:
+      # Persist database file and other data across container restarts
+      # The database (messages.db) will be stored in ./data/messages.db on the host
+      - ./data:/app/data
     environment:
       - CONNECTION_TYPE=tcp
       - TCP_HOST=192.168.1.100
@@ -15,12 +19,26 @@ services:
       - API_PORT=8000
       - LOG_LEVEL=INFO
       - MAX_MESSAGE_LENGTH=200
+      # Database configuration
+      - DB_PATH=/app/data/messages.db
+      - MESSAGE_RETENTION_DAYS=30
       # Channel blacklist (optional - prevents sending to these channels)
       # - BLACKLISTED_CHANNELS=LongFast
+      # Ollama configuration (optional - for message summarization)
+      # - OLLAMA_SERVER=http://ollama:11434
+      # - OLLAMA_MODEL=llama3.2
+      # - OLLAMA_TIMEOUT=30
+      # Webhook configuration (optional)
+      # - WEBHOOK_TIMEOUT=10
+      # - WEBHOOK_MAX_RETRIES=3
+      # - WEBHOOK_RETRY_DELAY=2.0
       # Security: Authentication disabled by default (suitable for trusted environments)
       # For production, uncomment and set:
       # - ENABLE_AUTH=true
-      # - API_KEYS=your-api-key-here
+      # - API_KEYS=your-api-key-here,another-api-key
+      # - RATE_LIMIT_PER_MINUTE=60
+      # - ENABLE_CORS=true
+      # - CORS_ORIGINS=https://yourdomain.com
     # For USB connections, uncomment and modify:
     # devices:
     #   - /dev/ttyUSB0:/dev/ttyUSB0

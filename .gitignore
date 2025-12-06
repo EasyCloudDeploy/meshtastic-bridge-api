@@ -45,6 +45,11 @@ uv.lock
 *.log
 logs/
 
+# Database
+data/
+*.db
+*.db-journal
+
 # Docker
 .dockerignore
 

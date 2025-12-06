@@ -53,13 +53,21 @@ def get_api_key(
 
     # Validate API key
     if not settings.api_keys or api_key not in settings.api_keys:
-        logger.warning(f"Invalid API key attempted: {api_key[:8]}...")
+        # Only log partial key in debug mode to reduce security risk
+        if settings.sanitize_logs:
+            logger.warning("Invalid API key attempted")
+        else:
+            logger.warning(f"Invalid API key attempted: {api_key[:8]}...")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API key",
         )
 
-    logger.debug(f"API key validated successfully: {api_key[:8]}...")
+    # Only log partial key in debug mode
+    if not settings.sanitize_logs:
+        logger.debug(f"API key validated successfully: {api_key[:8]}...")
+    else:
+        logger.debug("API key validated successfully")
     return api_key
 
 

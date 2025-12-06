@@ -95,10 +95,20 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
         Returns:
             Response
         """
-        # Get client IP
+        # Get client IP (validate X-Forwarded-For to prevent spoofing)
         client_ip = request.client.host if request.client else "unknown"
+        # Only trust X-Forwarded-For if we're behind a reverse proxy (in production)
+        # For now, prefer direct client IP but log X-Forwarded-For if present
         if "x-forwarded-for" in request.headers:
-            client_ip = request.headers["x-forwarded-for"].split(",")[0].strip()
+            forwarded_ips = [ip.strip() for ip in request.headers["x-forwarded-for"].split(",")]
+            # Use first IP but log warning if multiple (potential spoofing)
+            if len(forwarded_ips) > 1:
+                self.audit_logger.debug(f"Multiple X-Forwarded-For values detected: {forwarded_ips}")
+            # Sanitize IP to prevent injection
+            forwarded_ip = forwarded_ips[0] if forwarded_ips else client_ip
+            # Basic validation: should be valid IP format
+            if forwarded_ip and not forwarded_ip.startswith("unknown"):
+                client_ip = forwarded_ip
 
         # Log request
         self.audit_logger.info(

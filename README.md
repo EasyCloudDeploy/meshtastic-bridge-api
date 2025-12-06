@@ -256,8 +256,34 @@ You can also use the test script to send a single message:
 ### API Documentation
 
 Once the server is running, visit:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- **Swagger UI**: `http://localhost:8000/docs` - Interactive API documentation with "Try it out" feature
+- **ReDoc**: `http://localhost:8000/redoc` - Beautiful, responsive API documentation
+- **OpenAPI JSON**: `http://localhost:8000/openapi.json` - OpenAPI specification in JSON format
+- **OpenAPI YAML**: `http://localhost:8000/openapi.yaml` - OpenAPI specification in YAML format (requires pyyaml)
+
+#### Exporting OpenAPI Specification
+
+You can export the OpenAPI specification to files using the provided script:
+
+```bash
+# Install pyyaml if not already installed
+pip install pyyaml
+
+# Export to both JSON and YAML
+python export_openapi.py
+```
+
+This will create:
+- `openapi.json` - OpenAPI specification in JSON format
+- `openapi.yaml` - OpenAPI specification in YAML format
+
+The OpenAPI spec includes:
+- Complete endpoint documentation with examples
+- Request/response schemas
+- Authentication requirements
+- Error responses
+- Query parameters and their descriptions
+- Comprehensive feature descriptions
 
 ## Docker Deployment
 

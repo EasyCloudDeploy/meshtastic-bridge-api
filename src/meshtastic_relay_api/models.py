@@ -87,3 +87,100 @@ class QueueStatusResponse(BaseModel):
     queue_size: int = Field(..., description="Current number of messages in queue")
     processing: bool = Field(..., description="Whether queue processor is running")
 
+
+class MessageItem(BaseModel):
+    """Individual message item in list response."""
+
+    id: str = Field(..., description="Message identifier")
+    message_text: str = Field(..., description="Message content")
+    channel: str = Field(..., description="Channel name")
+    direction: str = Field(..., description="Message direction: 'sent' or 'received'")
+    sender_id: Optional[str] = Field(default=None, description="Sender node ID")
+    sender_name: Optional[str] = Field(default=None, description="Sender name")
+    status: str = Field(..., description="Message status")
+    created_at: float = Field(..., description="Timestamp when message was created")
+    sent_at: Optional[float] = Field(default=None, description="Timestamp when message was sent")
+    received_at: Optional[float] = Field(
+        default=None, description="Timestamp when message was received"
+    )
+
+
+class MessageListResponse(BaseModel):
+    """Response model for message list."""
+
+    messages: list[MessageItem] = Field(..., description="List of messages")
+    total: int = Field(..., description="Total number of messages")
+    limit: int = Field(..., description="Limit used in query")
+    offset: int = Field(..., description="Offset used in query")
+
+
+class ScheduledMessageRequest(BaseModel):
+    """Request model for scheduling a message."""
+
+    message: str = Field(..., description="Message text to send", min_length=1)
+    channel: str = Field(..., description="Channel name (required)", min_length=1)
+    scheduled_at: float = Field(..., description="Unix timestamp when message should be sent")
+    recurrence_pattern: Optional[str] = Field(
+        default=None, description="Optional cron-like recurrence pattern"
+    )
+
+
+class ScheduledMessageResponse(BaseModel):
+    """Response model for scheduled message operations."""
+
+    success: bool = Field(..., description="Whether the message was scheduled successfully")
+    message_id: str = Field(..., description="Unique identifier for the scheduled message")
+    scheduled_at: float = Field(..., description="Timestamp when message will be sent")
+
+
+class BatchMessageRequest(BaseModel):
+    """Request model for batch message sending."""
+
+    messages: list[dict] = Field(
+        ...,
+        description="List of messages, each with 'message' and 'channel' fields",
+        min_length=1,
+    )
+
+
+class BatchMessageResponse(BaseModel):
+    """Response model for batch message operations."""
+
+    success: bool = Field(..., description="Whether batch was queued successfully")
+    total: int = Field(..., description="Total number of messages in batch")
+    queued: int = Field(..., description="Number of messages successfully queued")
+    failed: int = Field(..., description="Number of messages that failed")
+    results: list[dict] = Field(..., description="Individual message results")
+
+
+class WebhookRequest(BaseModel):
+    """Request model for creating a webhook."""
+
+    url: str = Field(..., description="Webhook URL", min_length=1)
+    channel_filter: Optional[str] = Field(
+        default=None, description="Optional channel name filter"
+    )
+    secret: Optional[str] = Field(default=None, description="Optional secret for authentication")
+
+
+class WebhookResponse(BaseModel):
+    """Response model for webhook operations."""
+
+    id: str = Field(..., description="Webhook identifier")
+    url: str = Field(..., description="Webhook URL")
+    channel_filter: Optional[str] = Field(default=None, description="Channel filter")
+    enabled: bool = Field(..., description="Whether webhook is enabled")
+    created_at: float = Field(..., description="Timestamp when webhook was created")
+
+
+class MessageStatusResponse(BaseModel):
+    """Response model for message status."""
+
+    message_id: str = Field(..., description="Message identifier")
+    status: str = Field(..., description="Current status")
+    created_at: float = Field(..., description="Timestamp when message was created")
+    sent_at: Optional[float] = Field(default=None, description="Timestamp when message was sent")
+    received_at: Optional[float] = Field(
+        default=None, description="Timestamp when message was received"
+    )
+
