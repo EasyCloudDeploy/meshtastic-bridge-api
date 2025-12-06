@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  meshtastic-relay-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: meshtastic-relay-api
+    ports:
+      - "8000:8000"
+    environment:
+      - CONNECTION_TYPE=tcp
+      - TCP_HOST=192.168.1.100
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=INFO
+      - MAX_MESSAGE_LENGTH=200
+      # Channel blacklist (optional - prevents sending to these channels)
+      # - BLACKLISTED_CHANNELS=LongFast
+      # Security: Authentication disabled by default (suitable for trusted environments)
+      # For production, uncomment and set:
+      # - ENABLE_AUTH=true
+      # - API_KEYS=your-api-key-here
+    # For USB connections, uncomment and modify:
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    # environment:
+    #   - CONNECTION_TYPE=usb
+    #   - USB_DEVICE=/dev/ttyUSB0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
