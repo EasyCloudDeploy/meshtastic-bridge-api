@@ -77,8 +77,8 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             APP_VERSION=${{ steps.version.outputs.version }}
-          cache-from: type=registry,ref=${DOCKER_REPO}:buildcache
-          cache-to: type=registry,ref=${DOCKER_REPO}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.DOCKER_REPO }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_REPO }}:buildcache,mode=max
           platforms: linux/amd64,linux/arm64
 
       - name: Image digest
