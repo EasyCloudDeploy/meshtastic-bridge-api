@@ -22,6 +22,7 @@ from .models import (
     MessageResponse,
     QueueStatusResponse,
 )
+from .ollama_client import OllamaClient
 from .rate_limit import get_rate_limit_key, get_rate_limiter
 from .security_middleware import AuditLoggingMiddleware, SecurityHeadersMiddleware
 from .version import get_version
@@ -48,6 +49,7 @@ logger = get_logger(__name__)
 settings = Settings()
 meshtastic_manager: MeshtasticManager | None = None
 message_queue: MessageQueue | None = None
+ollama_client: OllamaClient | None = None
 
 # Initialize rate limiter early
 limiter = get_rate_limiter(settings)
@@ -61,7 +63,7 @@ async def lifespan(app: FastAPI):
     Args:
         app: FastAPI application instance
     """
-    global meshtastic_manager, message_queue
+    global meshtastic_manager, message_queue, ollama_client
 
     # Startup
     logger.info("Starting Meshtastic Relay API")
@@ -101,6 +103,20 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.info("No channels blacklisted")
+
+    # Initialize and test Ollama connection
+    if settings.ollama_server:
+        logger.info(f"Initializing Ollama client (server: {settings.ollama_server}, model: {settings.ollama_model})")
+        ollama_client = OllamaClient(settings)
+        is_available, error_msg = ollama_client.test_connection()
+        if is_available:
+            logger.info(f"✓ Ollama connection successful (model: {settings.ollama_model})")
+        else:
+            logger.warning(f"⚠️  Ollama connection failed: {error_msg}")
+            logger.warning("Message summarization will be disabled")
+            ollama_client = None
+    else:
+        logger.info("Ollama not configured (OLLAMA_SERVER not set) - summarization disabled")
 
     # Validate settings
     is_valid, error_msg = settings.validate_connection_settings()
@@ -319,11 +335,28 @@ async def send_message(
             detail="Message body cannot be empty",
         )
 
-    # Validate message length
-    if len(message_text) > settings.max_message_length:
+    # Try to summarize if message is 200+ characters and Ollama is available
+    final_message = message_text
+    was_summarized = False
+    if len(message_text) >= 200 and ollama_client is not None:
+        logger.info(f"Message is {len(message_text)} characters, attempting summarization...")
+        summary = ollama_client.summarize(message_text)
+        if summary and len(summary) < len(message_text):
+            final_message = summary
+            was_summarized = True
+            logger.info(f"Message summarized from {len(message_text)} to {len(summary)} characters")
+            audit_logger.info(
+                f"Message summarized: original={len(message_text)} chars, "
+                f"summary={len(summary)} chars"
+            )
+        else:
+            logger.warning("Summarization failed or did not reduce message length, using original")
+
+    # Validate final message length
+    if len(final_message) > settings.max_message_length:
         audit_logger.warning(
             f"Message too long rejected from {client_ip}: "
-            f"{len(message_text)} characters"
+            f"{len(final_message)} characters (was_summarized={was_summarized})"
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -333,23 +366,26 @@ async def send_message(
     # Enqueue the message
     try:
         message_id, queue_position = message_queue.enqueue(
-            message=message_text,
+            message=final_message,
             channel=sanitized_channel,
         )
 
         # Audit log (sanitized)
-        sanitized_msg = sanitize_message(message_text, settings)
-        audit_logger.info(
+        sanitized_msg = sanitize_message(final_message, settings)
+        log_msg = (
             f"Message queued: ID={message_id[:8]}... "
             f"from {client_ip} "
             f"channel={sanitized_channel} "
-            f"length={len(message_text)}"
+            f"length={len(final_message)}"
         )
+        if was_summarized:
+            log_msg += f" (summarized from {len(message_text)} chars)"
+        audit_logger.info(log_msg)
 
         return MessageResponse(
             success=True,
             message_id=message_id,
-            message=message_text,
+            message=final_message,
             channel=sanitized_channel,
             queue_position=queue_position,
         )

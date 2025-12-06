@@ -107,6 +107,22 @@ class Settings(BaseSettings):
         description="Enable debug/dry-run mode - logs message details without actually sending",
     )
 
+    # Ollama settings
+    ollama_server: Optional[str] = Field(
+        default=None,
+        description="Ollama server URL (e.g., http://localhost:11434). If not set, summarization is disabled.",
+    )
+    ollama_model: Optional[str] = Field(
+        default="llama3.2",
+        description="Ollama model name to use for summarization",
+    )
+    ollama_timeout: int = Field(
+        default=30,
+        description="Timeout in seconds for Ollama API requests",
+        ge=1,
+        le=300,
+    )
+
     @field_validator("connection_type", mode="before")
     @classmethod
     def validate_connection_type(cls, v: str) -> ConnectionType:
