@@ -20,6 +20,7 @@ RUN if [ -z "$APP_VERSION" ]; then \
 
 # Copy dependency files
 COPY pyproject.toml ./
+COPY README.md ./
 COPY src/ ./src/
 
 # Install dependencies using UV
