@@ -62,12 +62,13 @@ class OllamaClient:
         except Exception as e:
             return False, f"Error testing Ollama connection: {str(e)}"
 
-    def summarize(self, text: str) -> Optional[str]:
+    def summarize(self, text: str, force: bool = False) -> Optional[str]:
         """
         Summarize text using Ollama.
 
         Args:
             text: Text to summarize
+            force: If True, attempt summarization even for short messages (< 200 chars)
 
         Returns:
             Summarized text, or None if summarization fails
@@ -76,8 +77,8 @@ class OllamaClient:
             logger.warning("Ollama is not enabled, cannot summarize")
             return None
 
-        if not text or len(text.strip()) < 200:
-            # Don't summarize if text is too short
+        if not text or (not force and len(text.strip()) < 200):
+            # Don't summarize if text is too short (unless forced)
             return None
 
         try:

@@ -265,6 +265,10 @@ def validate_and_sanitize_channel(channel: str) -> str:
 async def send_message(
     request: Request,
     channel: str = Query(..., description="Channel name (required)", min_length=1),
+    force_summarize: bool = Query(
+        False,
+        description="Force summarization using Ollama. If true and summarization fails, an error is returned.",
+    ),
 ) -> MessageResponse:
     """
     Send a message to the Meshtastic device.
@@ -275,12 +279,13 @@ async def send_message(
     Args:
         request: FastAPI request object
         channel: Channel name (query parameter)
+        force_summarize: If true, force summarization using Ollama. If summarization fails, an error is returned.
 
     Returns:
         Message response with queue information
 
     Raises:
-        HTTPException: If message queue is not available, message is invalid, or channel is missing
+        HTTPException: If message queue is not available, message is invalid, channel is missing, or summarization fails when forced
     """
     # Get client IP for audit logging
     client_ip = request.client.host if request.client else "unknown"
@@ -335,18 +340,51 @@ async def send_message(
             detail="Message body cannot be empty",
         )
 
-    # Try to summarize if message is 200+ characters and Ollama is available
+    # Handle summarization
     final_message = message_text
     was_summarized = False
-    if len(message_text) >= 200 and ollama_client is not None:
-        logger.info(f"Message is {len(message_text)} characters, attempting summarization...")
+    
+    # Check if force_summarize is requested
+    if force_summarize:
+        if ollama_client is None:
+            audit_logger.warning(
+                f"Force summarize requested from {client_ip} but Ollama is not available"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ollama is not configured or unavailable. Cannot force summarization.",
+            )
+        
+        logger.info(f"Force summarization requested for {len(message_text)} character message")
+        summary = ollama_client.summarize(message_text, force=True)
+        
+        if summary:
+            final_message = summary
+            was_summarized = True
+            logger.info(f"Message summarized from {len(message_text)} to {len(summary)} characters")
+            audit_logger.info(
+                f"Message force-summarized: original={len(message_text)} chars, "
+                f"summary={len(summary)} chars"
+            )
+        else:
+            audit_logger.warning(
+                f"Force summarization failed from {client_ip} for {len(message_text)} character message"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to summarize message. Ollama summarization returned no result.",
+            )
+    
+    # Automatic summarization for messages 200+ characters (only if not force_summarize)
+    elif len(message_text) >= 200 and ollama_client is not None:
+        logger.info(f"Message is {len(message_text)} characters, attempting automatic summarization...")
         summary = ollama_client.summarize(message_text)
         if summary and len(summary) < len(message_text):
             final_message = summary
             was_summarized = True
             logger.info(f"Message summarized from {len(message_text)} to {len(summary)} characters")
             audit_logger.info(
-                f"Message summarized: original={len(message_text)} chars, "
+                f"Message auto-summarized: original={len(message_text)} chars, "
                 f"summary={len(summary)} chars"
             )
         else:
